@@ -48,9 +48,8 @@ Item {
   }
 
   readonly property int settingsAudioRow: 0
-  readonly property int settingsGestureRow: 1
-  readonly property int settingsFocusRow: 2
-  readonly property int settingsFeatureRow: 3
+  readonly property int settingsFocusRow: 1
+  readonly property int settingsFeatureRow: 2
   readonly property int settingsAutoPrivacyRow: settingsFeatureRow + Model.FEATURE_TOGGLES.length
   readonly property int settingsCallRow: settingsAutoPrivacyRow + 1
   readonly property int settingsSnapshotRow: settingsCallRow + Model.CALL_ACTION_META.length
@@ -91,7 +90,6 @@ Item {
   // group lookup that answered for a named row would shadow it.
   function actionAt(index) {
     if (index === settingsAudioRow) return "audio"
-    if (index === settingsGestureRow) return "gesture"
     if (index === settingsFocusRow) return "focus"
     if (index === settingsAutoPrivacyRow) return "autoPrivacy"
     if (index === settingsSnapshotRow) return "snapshot"
@@ -111,7 +109,6 @@ Item {
     if (index === settingsAudioRow) return "cycleAudio"
     if (index === settingsFocusRow) return "cycleFocus"
     if (index === settingsAutoPrivacyRow) return "cycleAutoPrivacy"
-    if (index === settingsGestureRow) return "setGesture"
     var feature = settingsFeatureAt(index)
     if (feature) return "feature:" + feature.key
     var call = settingsCallAt(index)
@@ -131,15 +128,15 @@ Item {
     // ---- the row count covers the rows that exist ----
 
     function test_the_count_reaches_the_last_slot_and_stops() {
-      // Audio + gesture + focus + 3 features + auto-privacy + 3 call switches +
+      // Audio + focus + 3 features + auto-privacy + 3 call switches +
       // snapshot + 3 slots. Written out once, against the real list lengths, so a
-      // count that drifts from the chain shows up here. Fourteen rather than the
-      // fifteen it was: the Back row went with the page becoming a tab.
+      // count that drifts from the chain shows up here. Thirteen: the Back row went
+      // with the page becoming a tab, and the gesture row went in this fork.
       compare(Model.FEATURE_TOGGLES.length, 3)
       compare(Model.CALL_ACTION_META.length, 3)
       compare(Model.PRESET_SLOTS.length, 3)
-      compare(root.sectionCount("settings"), 14)
-      compare(root.settingsNativeRow, 11)
+      compare(root.sectionCount("settings"), 13)
+      compare(root.settingsNativeRow, 10)
     }
 
     function test_the_first_setting_is_the_first_row() {
@@ -167,10 +164,10 @@ Item {
         seen.push(root.actionAt(root.selectedIndex))
         root.moveCursor(1)
       }
-      compare(seen.slice(0, 14).join(" "),
-              "audio gesture focus "
+      compare(seen.slice(0, 13).join(" "),
+              "audio focus "
               + "feature:flipHorizontal feature:flipVertical feature:autoRotate "
-              + "autoPrivacy call:openLens call:tracking call:unmute "
+              + "autoPrivacy call:openLens call:rememberMode call:unmute "
               + "snapshot clear:1 clear:2 clear:3")
       compare(root.selectedIndex, root.sectionCount("settings") - 1)
     }
@@ -223,7 +220,7 @@ Item {
       // The three group lookups run after the named rows in activateSettingsRow, so
       // one of them answering for a named row would only show up as h/l adjusting
       // the wrong thing — adjustSettingsRow checks the groups too.
-      var named = [root.settingsAudioRow, root.settingsGestureRow, root.settingsFocusRow,
+      var named = [root.settingsAudioRow, root.settingsFocusRow,
                    root.settingsAutoPrivacyRow, root.settingsSnapshotRow]
       for (var i = 0; i < named.length; i++) {
         compare(root.settingsFeatureAt(named[i]), null, "row " + named[i] + " is a feature")
@@ -284,8 +281,7 @@ Item {
       // Rows are numbered in the order they appear so j goes down the screen. The
       // groups chain off each other, so this holds whatever their lengths become.
       compare(root.settingsAudioRow, 0)
-      verify(root.settingsAudioRow < root.settingsGestureRow)
-      verify(root.settingsGestureRow < root.settingsFocusRow)
+      verify(root.settingsAudioRow < root.settingsFocusRow)
       verify(root.settingsFocusRow < root.settingsFeatureRow)
       verify(root.settingsFeatureRow < root.settingsAutoPrivacyRow)
       verify(root.settingsAutoPrivacyRow < root.settingsCallRow)

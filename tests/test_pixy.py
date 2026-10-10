@@ -1673,6 +1673,66 @@ class ProfileStoreTests(unittest.TestCase):
             json.dump(blob, fh)
 
 
+class RememberedModeTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        patcher = mock.patch.dict(os.environ, {"XDG_STATE_HOME": self.tmp.name})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def run_cmd(self, argv):
+        args = pixy.build_parser().parse_args(argv)
+        return args.fn(args)
+
+    def test_nothing_remembered_reads_as_none(self):
+        self.assertIsNone(pixy.read_remembered())
+        self.assertEqual(self.run_cmd(["remember"]), {"ok": True, "remembered": None})
+
+    def test_round_trip(self):
+        self.assertEqual(self.run_cmd(["remember", "tracking"]),
+                         {"ok": True, "remembered": "tracking"})
+        self.assertEqual(pixy.read_remembered(), "tracking")
+        self.run_cmd(["remember", "standard"])
+        self.assertEqual(pixy.read_remembered(), "standard")
+
+    def test_privacy_is_not_a_mode_to_remember(self):
+        with redirect_stdout(io.StringIO()), self.assertRaises(SystemExit):
+            pixy.build_parser().parse_args(["remember", "privacy"])
+
+    def test_a_garbage_value_on_disk_reads_as_none(self):
+        os.makedirs(os.path.dirname(pixy.state_path()), exist_ok=True)
+        with open(pixy.state_path(), "w", encoding="utf-8") as fh:
+            json.dump({"mode": "privacy"}, fh)
+        self.assertIsNone(pixy.read_remembered())
+
+    def test_it_does_not_clobber_presets_or_profiles(self):
+        pixy.write_presets({1: {"pan": 30, "tilt": -10, "zoom": 120}})
+        pixy.write_profiles({"warm": {"brightness": 150}})
+        pixy.remember_mode("tracking")
+        self.assertEqual(pixy.read_presets(), {1: {"pan": 30, "tilt": -10, "zoom": 120}})
+        self.assertEqual(pixy.read_profiles(), {"warm": {"brightness": 150}})
+        pixy.write_presets({})
+        pixy.write_profiles({})
+        self.assertEqual(pixy.read_remembered(), "tracking")
+
+    def test_remembering_the_same_mode_writes_nothing(self):
+        pixy.remember_mode("standard")
+        before = os.stat(pixy.state_path()).st_mtime_ns
+        with mock.patch.object(pixy, "write_store") as write:
+            self.assertTrue(pixy.remember_mode("standard"))
+        write.assert_not_called()
+        self.assertEqual(os.stat(pixy.state_path()).st_mtime_ns, before)
+
+    def test_state_reports_it(self):
+        pixy.remember_mode("tracking")
+        with mock.patch.object(pixy, "find_video", return_value=None), \
+                mock.patch.object(pixy, "find_hidraw", return_value="/dev/hidrawX"), \
+                mock.patch.object(pixy, "read_mode", return_value=(None, 3)):
+            view = pixy.read_state()
+        self.assertEqual(view["remembered"], "tracking")
+
+
 class ConcurrentStoreTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

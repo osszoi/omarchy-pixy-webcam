@@ -48,7 +48,7 @@ Item {
   // Everything enabled, since the actions are independent and each test turns off
   // what it is not about.
   function actions(props) {
-    var a = { openLens: true, tracking: true, unmute: true }
+    var a = { openLens: true, rememberMode: true, unmute: true }
     for (var k in props) a[k] = props[k]
     return a
   }
@@ -137,7 +137,7 @@ Item {
       compare(planSpy.count, 1)
       var plan = planSpy.signalArguments[0][0]
       compare(plan.privacy, false)
-      compare(plan.mode, "tracking")
+      compare(plan.mode, undefined)
       compare(plan.muted, false)
 
       // Republishing the same stream state cannot consume the edge twice.
@@ -149,7 +149,7 @@ Item {
     function test_a_closed_panel_end_restores_only_the_recorded_changes() {
       session.enabled = true
       session.present = true
-      session.actions = actions({ tracking: false, unmute: false })
+      session.actions = actions({ rememberMode: false, unmute: false })
 
       session.observeStreaming(true)
       var token = snapshotSpy.signalArguments[0][0]
@@ -252,15 +252,16 @@ Item {
 
     // ---- what a call start plans ----
 
-    function test_all_three_actions_on_a_camera_that_needs_all_three() {
+    function test_the_start_opens_and_unmutes_but_never_plans_a_mode() {
       var plan = Model.callStartPlan(actions({}), now({}))
       compare(plan.privacy, false)
-      compare(plan.mode, "tracking")
+      compare(plan.mode, undefined)
+      compare(plan.restore.mode, undefined)
       compare(plan.muted, false)
     }
 
     function test_a_disabled_action_plans_nothing() {
-      var plan = Model.callStartPlan(actions({ tracking: false, unmute: false }), now({}))
+      var plan = Model.callStartPlan(actions({ rememberMode: false, unmute: false }), now({}))
       compare(plan.privacy, false)
       compare(plan.mode, undefined)
       compare(plan.muted, undefined)
@@ -269,7 +270,7 @@ Item {
     function test_nothing_enabled_is_an_empty_plan() {
       // What stops the panel writing to the camera, and showing a note about it,
       // every time someone opens a meeting app with the feature switched off.
-      var plan = Model.callStartPlan(actions({ openLens: false, tracking: false,
+      var plan = Model.callStartPlan(actions({ openLens: false, rememberMode: false,
                                               unmute: false }), now({}))
       verify(Model.planIsEmpty(plan))
     }
@@ -303,42 +304,36 @@ Item {
       compare(plan.restore.muted, undefined)
     }
 
-    function test_tracking_is_skipped_when_the_mode_is_unknown() {
-      // The 0x03 ambiguity: the camera will not always say which mode it is in, and
-      // restoring to a guess at the end of the call is worse than not touching it.
-      // Skipped at the start rather than fudged at the end, so nothing is recorded.
+    function test_an_unknown_mode_does_not_disable_the_other_actions() {
       var plan = Model.callStartPlan(actions({}), now({ mode: null }))
       compare(plan.mode, undefined)
-      compare(plan.restore.mode, undefined)
-      // The other two still apply — one unreadable field must not disable the rest.
       compare(plan.privacy, false)
       compare(plan.muted, false)
     }
 
-    function test_tracking_alone_never_opens_a_private_camera() {
+    function test_remember_mode_alone_never_opens_a_private_camera() {
       var plan = Model.callStartPlan(
-        actions({ openLens: false, tracking: true, unmute: false }),
+        actions({ openLens: false, rememberMode: true, unmute: false }),
         now({ privacy: true, mode: "privacy", muted: false }))
       verify(Model.planIsEmpty(plan))
       compare(plan.privacy, undefined)
-      compare(plan.mode, undefined)
     }
 
-    function test_tracking_can_follow_an_explicit_lens_open() {
+    function test_an_explicit_lens_open_lands_in_the_remembered_mode() {
       var plan = Model.callStartPlan(
-        actions({ openLens: true, tracking: true, unmute: false }),
+        actions({ openLens: true, rememberMode: true, unmute: false }),
         now({ privacy: true, mode: "privacy", muted: false }))
       compare(plan.privacy, false)
-      compare(plan.mode, "tracking")
       compare(plan.restore.privacy, true)
+      compare(Model.callModeTarget(plan, "tracking"), "tracking")
+      compare(Model.callModeTarget(plan, "standard"), "standard")
     }
 
-    function test_tracking_does_not_treat_unknown_privacy_as_open() {
+    function test_remember_mode_does_not_treat_unknown_privacy_as_open() {
       var plan = Model.callStartPlan(
-        actions({ openLens: false, tracking: true, unmute: false }),
+        actions({ openLens: false, rememberMode: true, unmute: false }),
         now({ privacy: null, mode: "standard", muted: false }))
       verify(Model.planIsEmpty(plan))
-      compare(plan.mode, undefined)
     }
 
     function test_an_absent_state_object_plans_nothing_rather_than_crashing() {
@@ -352,34 +347,32 @@ Item {
     function test_the_end_of_the_call_puts_back_exactly_what_the_start_changed() {
       var trip = roundTrip(actions({}), now({}))
       compare(trip.end.privacy, true)
-      compare(trip.end.mode, "standard")
       compare(trip.end.muted, true)
     }
 
-    function test_the_end_restores_the_mode_that_was_there_not_a_default() {
-      // "standard" is the common case, so a restore hardcoded to it would pass
-      // every other test in this file.
-      var trip = roundTrip(actions({}), now({ mode: "privacy" }))
-      compare(trip.end.mode, "privacy")
+    function test_the_end_never_writes_a_mode() {
+      // by the time the end edge is seen the app let go of the stream, and an idle
+      // camera drops Standard/Tracking writes. this restore is what used to leave
+      // the camera stuck in Tracking after every call
+      var modes = ["standard", "tracking", "privacy"]
+      for (var i = 0; i < modes.length; i++) {
+        var trip = roundTrip(actions({}), now({ mode: modes[i] }))
+        compare(trip.end.mode, undefined, modes[i])
+      }
     }
 
-    function test_opening_privacy_and_enabling_tracking_is_one_absolute_write() {
-      compare(Model.callModeTarget({ privacy: false, mode: "tracking" }),
-              "tracking")
+    function test_opening_the_lens_is_one_absolute_write_to_the_remembered_mode() {
+      compare(Model.callModeTarget({ privacy: false }, "tracking"), "tracking")
     }
 
-    function test_restoring_privacy_collapses_a_redundant_saved_mode() {
-      compare(Model.callModeTarget({ mode: "privacy", privacy: true }),
-              "privacy")
+    function test_closing_the_lens_wins_over_the_remembered_mode() {
+      compare(Model.callModeTarget({ privacy: true }, "tracking"), "privacy")
     }
 
-    function test_lens_open_only_maps_to_standard() {
+    function test_lens_open_without_a_remembered_mode_maps_to_standard() {
       compare(Model.callModeTarget({ privacy: false }), "standard")
-    }
-
-    function test_explicit_modes_are_the_single_target() {
-      compare(Model.callModeTarget({ mode: "standard" }), "standard")
-      compare(Model.callModeTarget({ mode: "tracking" }), "tracking")
+      compare(Model.callModeTarget({ privacy: false }, ""), "standard")
+      compare(Model.callModeTarget({ privacy: false }, "privacy"), "standard")
     }
 
     function test_a_plan_without_a_camera_change_has_no_mode_write() {
@@ -399,7 +392,7 @@ Item {
       var trip = roundTrip(actions({}), now({ privacy: false, muted: false }))
       compare(trip.end.privacy, undefined)
       compare(trip.end.muted, undefined)
-      compare(trip.end.mode, "standard")
+      compare(trip.end.mode, undefined)
     }
 
     function test_the_round_trip_is_the_identity_for_every_starting_state() {
@@ -463,7 +456,6 @@ Item {
       var plan = Model.callStartPlan(actions({}), now({}))
       var label = Model.callActionLabel(plan)
       verify(label.indexOf("opened the lens") >= 0, label)
-      verify(label.indexOf("tracking on") >= 0, label)
       verify(label.indexOf("unmuted") >= 0, label)
     }
 
@@ -475,7 +467,6 @@ Item {
       verify(label.indexOf("closed the lens") >= 0, label)
       verify(label.indexOf("muted") >= 0, label)
       verify(label.indexOf("unmuted") < 0, label)
-      verify(label.indexOf("standard") >= 0, label)
     }
 
     function test_an_empty_plan_says_nothing() {
@@ -489,6 +480,13 @@ Item {
 
     // ---- the settings the switches write ----
 
+    function test_remember_mode_is_on_unless_turned_off() {
+      verify(Model.callSettingDefault("rememberMode"))
+      verify(!Model.callSettingDefault("callOpenLens"))
+      verify(!Model.callSettingDefault("callUnmute"))
+      verify(!Model.callSettingDefault("nope"))
+    }
+
     function test_every_action_has_a_switch_and_a_setting() {
       // CALL_ACTION_META drives both the device page's rows and the widget settings
       // dialog. A key here that the plan does not know is a switch that does
@@ -498,7 +496,7 @@ Item {
       for (var i = 0; i < Model.CALL_ACTION_META.length; i++) {
         var meta = Model.CALL_ACTION_META[i]
         verify(Model.CALL_ACTIONS.indexOf(meta.key) >= 0, meta.key + " is not a plan action")
-        verify(meta.setting.indexOf("call") === 0, meta.setting)
+        verify(meta.setting !== "", meta.key)
         verify(meta.label !== "" && meta.note !== "", meta.key)
       }
     }
@@ -516,11 +514,11 @@ Item {
       // while the automation stayed on.
       for (var i = 0; i < Model.CALL_ACTION_META.length; i++) {
         var key = Model.CALL_ACTION_META[i].setting
-        var off = Model.boolSettingArgs("nille.emeet-pixy", key, false)
+        var off = Model.boolSettingArgs("eduardo.pixy", key, false)
         compare(off[off.length - 2], "false")
         compare(off[off.length - 1], "{}")
         verify(off.indexOf(key) >= 0)
-        var on = Model.boolSettingArgs("nille.emeet-pixy", key, true)
+        var on = Model.boolSettingArgs("eduardo.pixy", key, true)
         compare(on[on.length - 2], "true")
       }
     }

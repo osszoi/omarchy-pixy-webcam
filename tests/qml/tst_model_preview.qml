@@ -182,9 +182,9 @@ Item {
       // The whole reason this function is tested. `setBarWidget` JSON-parses its
       // value argument, so a quoted "false" would arrive as a truthy string and
       // the preview would stay on with the switch showing off.
-      var off = Model.previewSettingArgs("nille.emeet-pixy", false)
+      var off = Model.previewSettingArgs("eduardo.pixy", false)
       compare(off[off.length - 2], "false")
-      var on = Model.previewSettingArgs("nille.emeet-pixy", true)
+      var on = Model.previewSettingArgs("eduardo.pixy", true)
       compare(on[on.length - 2], "true")
       verify(off.indexOf("\"false\"") < 0)
     }
@@ -192,11 +192,11 @@ Item {
     function test_previewSettingArgs_targets_the_shell_and_the_given_module() {
       // argv, not a shell string: the caller uses Quickshell.execDetached, so a
       // stray quote here would be a literal argument rather than a syntax error.
-      var argv = Model.previewSettingArgs("nille.emeet-pixy", false)
+      var argv = Model.previewSettingArgs("eduardo.pixy", false)
       compare(argv[0], "omarchy-shell")
       compare(argv.indexOf("shell") >= 0, true)
       compare(argv.indexOf("setBarWidget") >= 0, true)
-      compare(argv.indexOf("nille.emeet-pixy") >= 0, true)
+      compare(argv.indexOf("eduardo.pixy") >= 0, true)
       compare(argv.indexOf("preview") >= 0, true)
       // Empty selector, so the write applies to every instance of the widget.
       compare(argv[argv.length - 1], "{}")
@@ -208,7 +208,7 @@ Item {
       // land on a widget that is not this one.
       var argv = Model.previewSettingArgs("someone.else", true)
       compare(argv.indexOf("someone.else") >= 0, true)
-      compare(argv.indexOf("nille.emeet-pixy") < 0, true)
+      compare(argv.indexOf("eduardo.pixy") < 0, true)
     }
   }
 }

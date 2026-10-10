@@ -21,6 +21,7 @@ var PTZ_STEP = 5
 var PRESET_SLOTS = [1, 2, 3]
 
 var MODES = ["standard", "tracking", "privacy"]
+var REMEMBERED_MODES = ["standard", "tracking"]
 
 function clamp(value, low, high) {
   var n = Number(value)
@@ -101,6 +102,7 @@ function parseState(raw) {
     tilt: clampTilt(data.tilt),
     zoom: clampZoom(data.zoom === undefined ? ZOOM_MIN : data.zoom),
     presets: normalizePresets(data.presets),
+    remembered: REMEMBERED_MODES.indexOf(String(data.remembered)) >= 0 ? String(data.remembered) : null,
     videoError: String(data.videoError || ""),
     hidError: String(data.hidError || "")
   }
@@ -131,6 +133,7 @@ function absentState(error) {
     tilt: 0,
     zoom: ZOOM_MIN,
     presets: {},
+    remembered: null,
     videoError: "",
     hidError: ""
   }
@@ -300,6 +303,13 @@ function modeWritable(state) {
   return state.streaming === true || state.selfStreaming === true
 }
 
+// with the mode remembered a pick can be made while idle, but not with the lens shut:
+// writing it would open the lens as a side effect
+function modeChoosable(state, remembering) {
+  if (modeWritable(state)) return true
+  return !!remembering && !!state && state.present === true && state.privacy === false
+}
+
 // Explains why the mode reads as unknown, for the line under the mode selector.
 // Empty when there is nothing worth saying, so the caller can hide the row.
 //
@@ -309,12 +319,15 @@ function modeWritable(state) {
 // looking broken: two hollow chips and a note explaining a detail the reader had
 // not asked about. What they want to know is why neither is lit and why pressing
 // one does nothing, and those have a single answer.
-function modeNote(state) {
+function modeNote(state, remembered) {
   if (!state || !state.present || state.privacy) return ""
   if (state.modeUnknown === "no-response") return "The camera is not answering control queries."
   if (state.modeUnknown === "no-hid")
     return "The vendor control interface was not found — check the udev rule."
   if (state.hidError) return state.hidError
+  if (!modeWritable(state) && REMEMBERED_MODES.indexOf(remembered) >= 0)
+    return modeName(remembered) + " is saved. The camera only switches while an app "
+      + "is using it, so it's applied as soon as one does."
   if (!modeWritable(state))
     return "The camera only switches between Standard and Tracking while it is in "
       + "use. Turn the preview on, or start a call, to change it."
@@ -347,7 +360,7 @@ function streamLabel(state) {
 // anything that was already in the wanted state is left alone, so ending a call
 // cannot undo something the user set by hand.
 
-var CALL_ACTIONS = ["tracking", "unmute", "openLens"]
+var CALL_ACTIONS = ["rememberMode", "unmute", "openLens"]
 
 // The same three actions as the panel draws them: in the order they are applied,
 // each with the settings key that persists it. Separate from CALL_ACTIONS because
@@ -356,11 +369,22 @@ var CALL_ACTIONS = ["tracking", "unmute", "openLens"]
 var CALL_ACTION_META = [
   { key: "openLens", setting: "callOpenLens", label: "Open the lens",
     note: "Uncovers the camera when a call starts, and closes it again after." },
-  { key: "tracking", setting: "callTracking", label: "Turn tracking on",
-    note: "Follows you during the call, then restores the previous mode." },
+  { key: "rememberMode", setting: "rememberMode", label: "Remember Standard/Tracking",
+    note: "Your last pick is put back whenever the camera is in use.",
+    defaultValue: true },
   { key: "unmute", setting: "callUnmute", label: "Unmute the microphone",
     note: "Only if it was muted — a mic left on is left alone." }
 ]
+
+function callSettingDefault(setting) {
+  for (var i = 0; i < CALL_ACTION_META.length; i++)
+    if (CALL_ACTION_META[i].setting === setting) return CALL_ACTION_META[i].defaultValue === true
+  return false
+}
+
+function rememberArgs(helper, mode) {
+  return [helper, "remember", String(mode)]
+}
 
 // Is this transition a call starting or ending?
 //
@@ -389,11 +413,11 @@ function shouldPollHolders(opened, previewWanted, automationEnabled, restorePend
 //
 // Returns an object of the changes to make, and — the part that matters — a
 // `restore` object recording only what was actually changed. Ending the call
-// replays `restore`, so a camera that was already unmuted and already tracking
+// replays `restore`, so a camera that was already unmuted and already open
 // comes out of the call exactly as it went in. Without that bookkeeping, "end of
 // call" would mute a mic the user had deliberately left on.
 //
-// `actions` is the enabled set as {tracking, unmute, openLens}. `now` is
+// `actions` is the enabled set as {rememberMode, unmute, openLens}. `now` is
 // {privacy, mode, muted} — the live camera and mic state.
 function callStartPlan(actions, now) {
   var opts = actions || {}
@@ -408,17 +432,8 @@ function callStartPlan(actions, now) {
     plan.restore.privacy = true
   }
 
-  // Tracking only when the mode is known. An unknown mode means the camera would
-  // not say whether it is already tracking, and restoring to a guess at the end
-  // of the call is worse than not touching it — see the 0x03 ambiguity.
-  // Tracking must not be an implicit way to uncover the camera. The helper has
-  // to leave Privacy before it can enable Tracking, so only plan that transition
-  // when opening the lens is itself enabled.
-  if (opts.tracking && state.mode && state.mode !== "tracking"
-      && (state.privacy === false || opts.openLens)) {
-    plan.mode = "tracking"
-    plan.restore.mode = state.mode
-  }
+  // Standard/Tracking isn't planned here, modeSync owns it. a restore at call
+  // end can't work anyway: the app already let go, and an idle camera drops the write
 
   if (opts.unmute && state.muted === true) {
     plan.muted = false
@@ -431,15 +446,9 @@ function callStartPlan(actions, now) {
 // The inverse: what to undo when the call ends, from the `restore` recorded at
 // the start. Only keys that were changed appear, so this is a no-op for anything
 // the user had already set the way the call wanted it.
-//
-// Privacy is restored *last* in the caller's ordering for the same reason it is
-// applied first: closing the lens while also writing a mode makes the mode write
-// land on a camera that is going into privacy, and the firmware ignores
-// Standard/Tracking writes made from privacy.
 function callEndPlan(restore) {
   var saved = restore || {}
   var plan = {}
-  if (saved.mode !== undefined) plan.mode = saved.mode
   if (saved.muted !== undefined) plan.muted = saved.muted
   if (saved.privacy !== undefined) plan.privacy = saved.privacy
   return plan
@@ -451,11 +460,11 @@ function callEndPlan(restore) {
 // one helper process. Collapsing the plan to its final target therefore makes
 // the whole transition one serialized hardware operation instead of trying to
 // order several detached processes in QML.
-function callModeTarget(plan) {
+function callModeTarget(plan, remembered) {
   var change = plan || {}
   if (change.privacy === true) return "privacy"
-  if (change.mode) return change.mode
-  if (change.privacy === false) return "standard"
+  if (change.privacy === false)
+    return REMEMBERED_MODES.indexOf(remembered) >= 0 ? remembered : "standard"
   return ""
 }
 
@@ -478,11 +487,48 @@ function callActionLabel(plan) {
   var parts = []
   if (plan.privacy === false) parts.push("opened the lens")
   if (plan.privacy === true) parts.push("closed the lens")
-  if (plan.mode === "tracking") parts.push("tracking on")
-  else if (plan.mode) parts.push(plan.mode)
   if (plan.muted === false) parts.push("unmuted")
   if (plan.muted === true) parts.push("muted")
   return parts.join(", ")
+}
+
+// ---------------------------------------------------------------- remembered mode
+
+var MODE_SYNC_ATTEMPTS = 4
+var MODE_SYNC_RETRY_MS = 2000
+
+function freshModeMemory() {
+  return { asked: "", askedAt: 0, attempts: 0 }
+}
+
+// what to do with Standard/Tracking after a state read. only readable (and writable)
+// while something holds the stream and the lens is open. anything that disagrees with
+// the pick gets written back; retries are spaced out because the firmware drops writes
+// for a second or two after a stream starts
+function modeSync(memory, state, remembered, now) {
+  var mem = memory || freshModeMemory()
+  var live = !!state && state.present === true && state.privacy === false
+    && (state.streaming === true || state.selfStreaming === true)
+    && REMEMBERED_MODES.indexOf(state.mode) >= 0
+  if (!live || REMEMBERED_MODES.indexOf(remembered) < 0)
+    return { memory: freshModeMemory(), write: "" }
+
+  if (state.mode === remembered) return { memory: freshModeMemory(), write: "" }
+
+  var waiting = mem.asked === remembered && now - mem.askedAt < MODE_SYNC_RETRY_MS
+  if (waiting || mem.attempts >= MODE_SYNC_ATTEMPTS) return { memory: mem, write: "" }
+
+  return { memory: { asked: remembered, askedAt: now, attempts: mem.attempts + 1 },
+           write: remembered }
+}
+
+// a pick by hand already wrote once, so the settle read right after doesn't resend it
+function modeMemoryAfterPick(mode, now) {
+  return { asked: mode, askedAt: now, attempts: 1 }
+}
+
+function modeSyncPending(memory) {
+  return !!memory && !!memory.asked && memory.attempts < MODE_SYNC_ATTEMPTS
 }
 
 // ---------------------------------------------------------------- pages

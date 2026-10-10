@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
-  "id": "nille.emeet-pixy",
+  "id": "eduardo.pixy",
   "name": "EMEET PIXY",
   "version": "1.2.0",
-  "author": "nille",
+  "author": "eduardo (fork of nille/omarchy-emeet-pixy)",
   "license": "MIT",
   "description": "EMEET PIXY webcam control: privacy, AI tracking, pan/tilt/zoom, microphone, image settings, framing presets, snapshots, and the camera's own firmware settings.",
   "kinds": [
@@ -28,7 +28,7 @@
       "hideWhenAbsent": false,
       "preview": true,
       "callOpenLens": false,
-      "callTracking": false,
+      "rememberMode": true,
       "callUnmute": false
     },
     "schema": [
@@ -74,11 +74,11 @@
         "description": "Uncover the camera as soon as another app starts using it, and close it again when that app lets go. A call is any app holding the video stream, so this needs no list of meeting apps. Only reverses what it changed: a lens that was already open is left open."
       },
       {
-        "key": "callTracking",
+        "key": "rememberMode",
         "type": "boolean",
-        "label": "Turn tracking on when a call starts",
-        "defaultValue": false,
-        "description": "Switch the camera to AI tracking for the duration of a call, then restore the mode it was in. Skipped when the camera will not say which mode it is in, since restoring to a guess is worse than not touching it."
+        "label": "Remember Standard/Tracking",
+        "defaultValue": true,
+        "description": "Keep the last mode you picked and put the camera back in it whenever an app is using it, undoing any change made behind the panel's back. The camera only accepts the switch while something holds the stream, so the first couple of seconds of a call can still be in the old mode."
       },
       {
         "key": "callUnmute",

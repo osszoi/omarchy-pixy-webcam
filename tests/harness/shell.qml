@@ -19,7 +19,7 @@ import qs.Ui
 // which this checkout has no way to provide, and which no QML_IMPORT_PATH can
 // substitute for. The wrapper builds that level in a temp directory and sets
 // PIXY_DIR, which points the panel's helper at this working tree instead of
-// ~/.config/omarchy/plugins/nille.emeet-pixy. Without it the harness drives the
+// ~/.config/omarchy/plugins/eduardo.pixy. Without it the harness drives the
 // installed copy, which is rarely what you want while editing.
 ShellRoot {
   id: harness
@@ -104,7 +104,7 @@ ShellRoot {
         source: "../../Panel.qml"
         onLoaded: {
           item.bar = stubBar
-          item.moduleName = "nille.emeet-pixy"
+          item.moduleName = "eduardo.pixy"
           // `preview` is set explicitly rather than left to the schema default so
           // this object matches every key the panel reads. Note that the preview
           // switch cannot actually persist here: its write goes out to

@@ -2,6 +2,10 @@
 
 An EMEET PIXY webcam control panel for the Omarchy 4 bar.
 
+Fork of [nille/omarchy-emeet-pixy](https://github.com/nille/omarchy-emeet-pixy) (MIT). The main
+difference is that Standard/Tracking is remembered: pick one and every call starts in it, instead
+of the camera drifting back to Tracking after a call. See [Remembered mode](#remembered-mode).
+
 Close the lens, switch AI tracking on or off, aim the camera, and recall framing presets — from a bar
 widget that looks and behaves like the first-party ones.
 
@@ -31,7 +35,7 @@ widget that looks and behaves like the first-party ones.
   saturation, sharpness, gamma, white balance, hue, gain, exposure, focus and the rest — on the IMAGE
   tab, with named profiles recalling all of them at once. They go over UVC control ioctls rather than
   the capture stream, so they work while a meeting client holds the camera.
-- **The camera's own settings**, on the SETTINGS tab: microphone noise cancelling, gesture control,
+- **The camera's own settings**, on the SETTINGS tab: microphone noise cancelling,
   mirror and flip, what the autofocus aims at, and the idle shutter timeout. All of them live in the
   camera's firmware, so they persist across reboots and apply to every app — not just this one.
 - **Snapshots.** One button, or one keybinding, for a full-resolution still to `~/Pictures`.
@@ -45,15 +49,12 @@ widget that looks and behaves like the first-party ones.
 
 ## Install
 
-```bash
-omarchy plugin add https://github.com/nille/omarchy-emeet-pixy --enable
-```
-
-`--enable` puts it straight into the bar's right section. Without it, add it later via **Omarchy menu
-→ Bar → Widgets**, or with:
+Linked from a checkout, so edits here are what the shell runs:
 
 ```bash
-omarchy plugin enable nille.emeet-pixy --section right
+ln -s "$PWD" ~/.config/omarchy/plugins/eduardo.pixy
+omarchy plugin disable nille.emeet-pixy   # if the original is installed, they'd fight over the camera
+omarchy plugin enable eduardo.pixy --section right
 ```
 
 Then install the udev rule, which is what makes the mode controls work as a normal user:
@@ -75,14 +76,14 @@ up end to end. The udev rule is the one step needing root.
 ### Uninstall
 
 ```bash
-omarchy plugin remove nille.emeet-pixy
+omarchy plugin remove eduardo.pixy
 sudo rm -f /etc/udev/rules.d/70-emeet-pixy.rules
 ```
 
 No daemon, no unit file. Two things live outside the plugin directory: its entry in
 `~/.config/omarchy/shell.json`, removed by `plugin remove`, and your presets in
 `~/.local/state/omarchy-emeet-pixy/presets.json`, to delete by hand. `plugin remove` also keeps a
-timestamped copy of the plugin directory beside it as `.nille.emeet-pixy.bak.<stamp>`, which is
+timestamped copy of the plugin directory beside it as `.eduardo.pixy.bak.<stamp>`, which is
 Omarchy's doing rather than this plugin's — delete it once you are sure. Privacy mode lives in the
 camera, not here — uninstall with the lens closed and it stays closed.
 
@@ -107,7 +108,7 @@ the standard library.
 | `hideWhenAbsent` | `false` | Remove the bar icon when no camera is found, instead of showing a dimmed one. |
 | `preview` | `true` | Show a live video preview in the panel. The switch above the preview writes this same setting. See [The preview and other apps](#the-preview-and-other-apps). |
 | `callOpenLens` | `false` | Open the lens when another app starts using the camera, and close it again after. |
-| `callTracking` | `false` | Switch to AI tracking for the duration of a call, then restore the previous mode. |
+| `rememberMode` | `true` | Keep your last Standard/Tracking pick and put the camera back in it whenever it is in use. See [Remembered mode](#remembered-mode). |
 | `callUnmute` | `false` | Unmute the camera's microphone when a call starts — only if it was muted. |
 
 The three `call*` settings have switches on the SETTINGS tab too; see
@@ -116,11 +117,11 @@ The three `call*` settings have switches on the SETTINGS tab too; see
 Set them in the settings dialog, in `~/.config/omarchy/shell.json`, or from the CLI:
 
 ```bash
-omarchy bar set nille.emeet-pixy refreshIntervalSec 15 --json
-omarchy bar set nille.emeet-pixy ptzStep 10 --json
-omarchy bar set nille.emeet-pixy hideWhenAbsent true --json
-omarchy bar set nille.emeet-pixy preview false --json
-omarchy bar set nille.emeet-pixy callOpenLens true --json
+omarchy bar set eduardo.pixy refreshIntervalSec 15 --json
+omarchy bar set eduardo.pixy ptzStep 10 --json
+omarchy bar set eduardo.pixy hideWhenAbsent true --json
+omarchy bar set eduardo.pixy preview false --json
+omarchy bar set eduardo.pixy callOpenLens true --json
 ```
 
 `--json` is what distinguishes the number `15` and the boolean `true` from the strings `"15"` and
@@ -215,9 +216,9 @@ Everything is reachable over IPC, so the camera is controllable without opening 
 `~/.config/hypr/bindings.conf`:
 
 ```
-bind = SUPER SHIFT, C, exec, quickshell -p $OMARCHY_PATH/shell ipc call nille.emeet-pixy privacyToggle
-bind = SUPER ALT,   C, exec, quickshell -p $OMARCHY_PATH/shell ipc call nille.emeet-pixy toggle
-bind = SUPER SHIFT, M, exec, quickshell -p $OMARCHY_PATH/shell ipc call nille.emeet-pixy micToggle
+bind = SUPER SHIFT, C, exec, quickshell -p $OMARCHY_PATH/shell ipc call eduardo.pixy privacyToggle
+bind = SUPER ALT,   C, exec, quickshell -p $OMARCHY_PATH/shell ipc call eduardo.pixy toggle
+bind = SUPER SHIFT, M, exec, quickshell -p $OMARCHY_PATH/shell ipc call eduardo.pixy micToggle
 ```
 
 Privacy and mute are the two worth binding: both are things you want mid-sentence, and privacy works
@@ -241,8 +242,8 @@ switch rather than something that returns at the next shell restart.
 camera held by something else.
 
 ```
-bind = SUPER SHIFT, B, exec, quickshell -p $OMARCHY_PATH/shell ipc call nille.emeet-pixy image brightness 200
-bind = SUPER SHIFT, P, exec, quickshell -p $OMARCHY_PATH/shell ipc call nille.emeet-pixy profile "Evening call"
+bind = SUPER SHIFT, B, exec, quickshell -p $OMARCHY_PATH/shell ipc call eduardo.pixy image brightness 200
+bind = SUPER SHIFT, P, exec, quickshell -p $OMARCHY_PATH/shell ipc call eduardo.pixy profile "Evening call"
 ```
 
 `image` takes the helper's own key names, so a keybinding and the CLI spell a control the same way, and
@@ -253,8 +254,8 @@ The firmware calls are worth binding for a different reason: they persist in the
 sets one sets it for good rather than for the session.
 
 ```
-bind = SUPER SHIFT, S, exec, quickshell -p $OMARCHY_PATH/shell ipc call nille.emeet-pixy snapshot
-bind = SUPER SHIFT, F, exec, quickshell -p $OMARCHY_PATH/shell ipc call nille.emeet-pixy mirror on
+bind = SUPER SHIFT, S, exec, quickshell -p $OMARCHY_PATH/shell ipc call eduardo.pixy snapshot
+bind = SUPER SHIFT, F, exec, quickshell -p $OMARCHY_PATH/shell ipc call eduardo.pixy mirror on
 ```
 
 Every on/off call takes `on` or `off`; anything else means on, so `gesture` with no argument turns
@@ -330,11 +331,13 @@ the driver or in this widget:
 | Setting | What it is |
 | --- | --- |
 | Microphone mode | Noise cancelling, Live, or Original — the DSP chain on the camera's own mic |
-| Gesture control | Lets a raised hand start and stop the camera's tracking |
 | Autofocus target | Center, Face, or Spot, with a pad for aiming the spot |
 | Mirror / flip / auto-rotate | Orientation, applied in the camera |
 | Auto privacy | Close the lens by itself after 1, 5, or 15 minutes idle |
 | Camera preset slots | What the camera holds in its own three slots, and a way to clear one |
+
+Gesture control (a raised palm toggles Tracking, the camera's only gesture) has no row here in this
+fork. It is still reachable as `scripts/pixy gesture on|off` and the `gesture` IPC method.
 
 Because these are firmware settings they **persist across reboots and apply to every app** — the mirror
 you set here is mirrored in Zoom, and it stays that way with this widget uninstalled. That is what makes
@@ -359,16 +362,42 @@ capture stream, so the panel's own preview yields for a moment and comes back �
 holding the stream is a different matter and is not worked around: there is no way to grab a frame from
 a stream someone else owns, so the button says so.
 
+### Remembered mode
+
+The camera only accepts a Standard/Tracking switch while something holds the video stream, and drops it
+silently otherwise. The original `callTracking` setting switched to Tracking when a call started and
+tried to switch back when it ended, but by then the meeting app had already let go of the camera, so
+the switch back was always dropped and the camera stayed in Tracking from then on.
+
+It can also drift on its own: with auto privacy on, the camera closes the lens after the idle timeout
+and reopens it by itself when the next call starts. In one of two test calls it reopened into Tracking,
+in the other into Standard.
+
+So instead the mode you pick is saved (in `~/.local/state/omarchy-emeet-pixy/presets.json`, not in
+`shell.json`) and enforced whenever the camera is in use:
+
+- Picking a chip, `t`, or the `standard`/`tracking` IPC methods saves it, even while the camera is idle
+  with the lens open. The note under the chips says it will apply once the camera is in use.
+- While anything holds the stream (a call, or the panel's own preview) the panel re-reads the mode every
+  few seconds and writes the pick back whenever they disagree: at call start, after the lens reopens,
+  or after a change made behind its back (the palm gesture, `pixy mode` from a terminal).
+- Until something has been picked it leaves the mode alone.
+
+Things it cannot do: the first second or so of a call runs in whatever mode the camera was in (about 1 s
+measured), since the firmware drops writes right after the stream starts; a mid-call change lasts up to
+~6 s before it is undone; and nothing is enforced while the shell is not running. Turn `rememberMode` off
+to leave the mode alone entirely.
+
 ### When a call starts
 
 A call here is **any other app holding the video stream**, which needs no list of meeting apps: the
 panel already tracks who is capturing in order to yield the preview, and its own preview is excluded.
-Three optional actions, each off by default:
+Two optional actions, each off by default:
 
-- **Open the lens**, and close it again afterwards.
-- **Turn tracking on**, then restore the previous mode. Skipped when the camera will not say which mode
-  it is in, since restoring to a guess is worse than not touching it.
+- **Open the lens**, and close it again afterwards. It opens into the remembered mode.
 - **Unmute the microphone** — only if it was muted to begin with.
+
+Standard/Tracking is not one of them, see [Remembered mode](#remembered-mode).
 
 Each is reversed at the end of the call, and *only if this widget was what changed it*: a lens you opened
 by hand stays open, and a mic deliberately left on is never muted for you. The panel says what it did
@@ -429,7 +458,7 @@ and the frame collapses; every control keeps working. Or press `v`, or bind `pre
 set it from the CLI — all of them write the same persistent `preview` setting:
 
 ```bash
-omarchy bar set nille.emeet-pixy preview false --json
+omarchy bar set eduardo.pixy preview false --json
 ```
 
 Persistent deliberately: a preview turned off before a call is turned off *because of* the call, and a

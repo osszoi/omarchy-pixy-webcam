@@ -1324,6 +1324,24 @@ def update_profile(name: str, entry: dict | None) -> tuple[bool, bool, dict]:
     return update_store(mutate), existed[0], latest
 
 
+
+REMEMBERED_MODES = ("standard", "tracking")
+
+
+def read_remembered() -> str | None:
+    mode = read_store().get("mode")
+    return mode if mode in REMEMBERED_MODES else None
+
+
+def remember_mode(mode: str) -> bool:
+    def mutate(blob: dict):
+        if blob.get("mode") == mode:
+            return False
+        blob["mode"] = mode
+
+    return update_store(mutate)
+
+
 # ---------------------------------------------------------------- capture
 #
 # Everything from here to the next divider exists only for `preview`. It is the
@@ -1736,6 +1754,7 @@ def read_state(include_presets: bool = True) -> dict:
         # control interface is unknown, not evidence that the shutter is open.
         "privacy": None,
         "presets": {},
+        "remembered": read_remembered(),
     }
 
     # Control mode lives on the HID interface, which stays reachable even while
@@ -1965,6 +1984,15 @@ def cmd_mode(args) -> dict:
         ),
         "streaming": streaming,
     }
+
+
+def cmd_remember(args) -> dict:
+    if args.mode is None:
+        return {"ok": True, "remembered": read_remembered()}
+    if not remember_mode(args.mode):
+        return {"ok": False, "error": "could not write the state file",
+                "remembered": read_remembered()}
+    return {"ok": True, "remembered": args.mode}
 
 
 def cmd_toggle_privacy(args) -> dict:
@@ -2819,6 +2847,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_mode = sub.add_parser("mode", help="set the control mode")
     p_mode.add_argument("mode", choices=sorted(MODE_VALUES), help="standard, tracking, or privacy")
     p_mode.set_defaults(fn=cmd_mode)
+
+    p_remember = sub.add_parser(
+        "remember", help="read or set the mode re-applied whenever the camera is in use"
+    )
+    p_remember.add_argument("mode", nargs="?", choices=REMEMBERED_MODES,
+                            help="omit to read the remembered mode")
+    p_remember.set_defaults(fn=cmd_remember)
 
     p_privacy = sub.add_parser("privacy", help="toggle privacy on/off")
     p_privacy.set_defaults(fn=cmd_toggle_privacy)

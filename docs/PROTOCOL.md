@@ -424,6 +424,11 @@ active: honest about the readback, but it read as a bug, and pressing a chip the
 did nothing with no error to explain it. That was reported as "neither Standard nor
 Tracking is highlighted", which is how this behavior was found.
 
+The same rule is why there is no "restore the mode when the call ends": the end of a call is detected
+*because* the app released the stream, so any Standard/Tracking write sent then lands on an idle camera
+and is dropped. The panel instead remembers the wanted mode and writes it while something is streaming
+(see `Model.modeSync`).
+
 *(observed)* Unrelated flake noticed while testing this, not currently handled: a
 direct `pixy mode privacy` on an idle camera lands about 2 times in 3 — the
 readback comes back `0x03` and `confirmed: false`. The panel's privacy path was

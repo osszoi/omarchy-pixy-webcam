@@ -13,8 +13,8 @@ import "Model.js" as Model
 // active Omarchy theme rather than from anything hardcoded here.
 Panel {
   id: root
-  moduleName: "nille.emeet-pixy"
-  ipcTarget: "nille.emeet-pixy"
+  moduleName: "eduardo.pixy"
+  ipcTarget: "eduardo.pixy"
   manageIpc: false
 
   // manageIpc: false so this panel owns the single IpcHandler its target
@@ -24,7 +24,7 @@ Panel {
   // plugin, which is what makes tests/harness/shell.qml drive the code you are
   // editing rather than the last copy you installed.
   readonly property string pluginDir: Quickshell.env("PIXY_DIR")
-    || (Quickshell.env("HOME") + "/.config/omarchy/plugins/nille.emeet-pixy")
+    || (Quickshell.env("HOME") + "/.config/omarchy/plugins/eduardo.pixy")
   readonly property string helper: pluginDir + "/scripts/pixy"
 
   // Separate from PIXY_DIR on purpose. That one is a path a live shell could
@@ -502,15 +502,15 @@ Panel {
 
   function callSetting(key) {
     var pending = callPending[key]
-    return pending === undefined ? setting(key, false) === true : pending
+    return pending === undefined ? setting(key, Model.callSettingDefault(key)) === true : pending
   }
 
   readonly property var callActions: ({
     openLens: callSetting("callOpenLens"),
-    tracking: callSetting("callTracking"),
+    rememberMode: callSetting("rememberMode"),
     unmute: callSetting("callUnmute")
   })
-  readonly property bool callAutomation: callActions.openLens || callActions.tracking
+  readonly property bool callAutomation: callActions.openLens || callActions.rememberMode
     || callActions.unmute
 
   function setCallAction(key, enabled) {
@@ -531,7 +531,7 @@ Panel {
     var next = {}
     var kept = false
     for (var key in callPending) {
-      if (callPending[key] === (setting(key, false) === true)) continue
+      if (callPending[key] === (setting(key, Model.callSettingDefault(key)) === true)) continue
       next[key] = callPending[key]
       kept = true
     }
@@ -581,9 +581,46 @@ Panel {
   // Privacy -> Standard -> Tracking transaction inside one process, so QML must
   // not split that ordered hardware operation across detached commands.
   function applyCallPlan(plan) {
-    var mode = Model.callModeTarget(plan)
-    if (mode) setMode(mode)
+    var mode = Model.callModeTarget(plan, remembered)
+    if (mode) writeMode(mode)
     if (plan.muted !== undefined) setMicMuted(plan.muted)
+  }
+
+  // ---------------------------------------------------------------- remembered mode
+
+  readonly property bool rememberMode: callActions.rememberMode
+  property string rememberedMode: ""
+  property double rememberedAt: 0
+  readonly property string remembered: rememberMode ? rememberedMode : ""
+  property var modeMemory: Model.freshModeMemory()
+
+  function remember(mode) {
+    if (!rememberMode || mode === rememberedMode) return
+    rememberedMode = mode
+    rememberedAt = Date.now()
+    Quickshell.execDetached(Model.rememberArgs(helper, mode))
+  }
+
+  // the state read can be older than our own remember write, so it only wins after a bit
+  function adoptRemembered(stored) {
+    if (stored && Date.now() - rememberedAt > 3000) rememberedMode = stored
+  }
+
+  function syncMode() {
+    if (!rememberMode) return
+    var step = Model.modeSync(modeMemory, camera, rememberedMode, Date.now())
+    modeMemory = step.memory
+    if (step.write) writeMode(step.write)
+  }
+
+  // reads while something streams, so a dropped write is retried and a mid-call change undone.
+  // not keyed on privacy: the firmware reopens the lens on its own when a call starts
+  Timer {
+    interval: Model.modeSyncPending(root.modeMemory) ? Model.MODE_SYNC_RETRY_MS : 6000
+    repeat: true
+    running: root.rememberMode && root.present
+      && (root.camera.streaming === true || root.camera.selfStreaming === true)
+    onTriggered: root.refresh()
   }
 
   // ---------------------------------------------------------------- microphone
@@ -735,9 +772,8 @@ Panel {
   // row for it would be a row where Enter does nothing — the dead stop the row-order
   // tests exist to prevent.
   readonly property int settingsAudioRow: 0
-  readonly property int settingsGestureRow: 1
-  readonly property int settingsFocusRow: 2
-  readonly property int settingsFeatureRow: 3
+  readonly property int settingsFocusRow: 1
+  readonly property int settingsFeatureRow: 2
   readonly property int settingsAutoPrivacyRow: settingsFeatureRow + Model.FEATURE_TOGGLES.length
   readonly property int settingsCallRow: settingsAutoPrivacyRow + 1
   readonly property int settingsSnapshotRow: settingsCallRow + Model.CALL_ACTION_META.length
@@ -762,7 +798,6 @@ Panel {
   // h/l does to them, so one key covers a three-option row.
   function activateSettingsRow(index) {
     if (index === settingsAudioRow) { cycleAudio(1); return }
-    if (index === settingsGestureRow) { setGesture(!vendorShown.gesture); return }
     if (index === settingsFocusRow) { cycleFocus(1); return }
     if (index === settingsAutoPrivacyRow) { cycleAutoPrivacy(1); return }
     if (index === settingsSnapshotRow) { takeSnapshot(); return }
@@ -785,7 +820,6 @@ Panel {
     if (index === settingsAutoPrivacyRow) { cycleAutoPrivacy(direction); return }
     // A switch keeps direction meaningful, as the image page's booleans do: l
     // turns it on, h off, so pressing l on something already on leaves it on.
-    if (index === settingsGestureRow) { setGesture(direction > 0); return }
     var feature = settingsFeatureAt(index)
     if (feature) { setFeature(feature.key, direction > 0); return }
     var call = settingsCallAt(index)
@@ -867,7 +901,7 @@ Panel {
     // and `t` are their interaction. The presets likewise: Enter recalls, `s` saves,
     // `x` clears.
     if (selectedIndex === frameModeRow)
-      setMode(camera.mode === "tracking" ? "standard" : "tracking")
+      setMode((camera.mode || remembered) === "tracking" ? "standard" : "tracking")
     else if (selectedIndex === framePanRow) setPan(shownPan + direction * ptzStep)
     else if (selectedIndex === frameTiltRow) setTilt(shownTilt + direction * ptzStep)
     else if (selectedIndex === frameZoomRow) setZoom(shownZoom + direction * 5)
@@ -923,7 +957,7 @@ Panel {
     if (focusSection === "frame") {
       // Sliders have no activate action — h/l is their whole interaction.
       if (selectedIndex === frameModeRow) {
-        setMode(camera.mode === "tracking" ? "standard" : "tracking")
+        setMode((camera.mode || remembered) === "tracking" ? "standard" : "tracking")
         return
       }
       if (selectedIndex === frameHomeRow) { home(); return }
@@ -1035,23 +1069,37 @@ Panel {
     run(Model.privacyArgs(helper))
   }
 
-  // Guarded in one place rather than at each caller, because there are four —
-  // the chips, `t`, h/l and Enter on the mode row, and the `tracking`/`standard`
-  // IPC methods — and a keybinding that silently does nothing is the same bug as
-  // a chip that does.
+  // Guarded in one place rather than at each caller, because there are several —
+  // the chips, `t`, h/l and Enter on the mode row, the IPC methods, call
+  // automation and syncMode — and a keybinding that silently does nothing is the
+  // same bug as a chip that does.
   //
   // Both directions of privacy are exempt, and the second one is easy to miss.
   // *Entering* privacy works on an idle camera, so gating it would break the one
   // control that most needs to work when the camera is doing nothing. *Leaving*
   // it is a mode write like any other — `privacyOff` is literally
-  // setMode("standard") — and it also works idle, verified: the lens reopens even
+  // writeMode("standard") — and it also works idle, verified: the lens reopens even
   // though which of Standard/Tracking it lands in is up to the firmware. Without
   // this second exemption the guard would lock the lens shut on an idle camera,
   // turning a fix for a dead button into a trap. See Model.modeWritable.
-  function setMode(mode) {
+  function writeMode(mode) {
     if (!present) return
     if (mode !== "privacy" && !camera.privacy && !Model.modeWritable(camera)) return
     run(Model.modeArgs(helper, mode))
+  }
+
+  // a pick by hand. remembered even while idle, syncMode applies it once the camera is in use
+  function setMode(mode) {
+    if (!present) return
+    if (rememberMode && mode !== "privacy") {
+      remember(mode)
+      modeMemory = Model.modeMemoryAfterPick(mode, Date.now())
+    }
+    writeMode(mode)
+  }
+
+  function openLens() {
+    writeMode(remembered || "standard")
   }
 
   // Pan and tilt travel together in one helper call, because they are one
@@ -1359,6 +1407,8 @@ Panel {
     }
     if (!zoomDebounce.running) pendingZoom = noPending
     clampCursor()
+    adoptRemembered(parsed.remembered)
+    syncMode()
     if (stateRunCallToken)
       callSession.acceptSnapshot(stateRunCallToken, parsed)
   }
@@ -1417,7 +1467,7 @@ Panel {
   // ---------------------------------------------------------------- IPC
 
   IpcHandler {
-    target: "nille.emeet-pixy"
+    target: "eduardo.pixy"
 
     function open(): void { root.open() }
     function close(): void { root.close() }
@@ -1429,7 +1479,7 @@ Panel {
     // cover the lens instantly — the case that matters most here.
     function privacyToggle(): void { root.togglePrivacy() }
     function privacyOn(): void { root.setMode("privacy") }
-    function privacyOff(): void { root.setMode("standard") }
+    function privacyOff(): void { root.openLens() }
     function tracking(): void { root.setMode("tracking") }
     function standard(): void { root.setMode("standard") }
     function pan(degrees: string): void { root.setPan(Number(degrees)) }
@@ -1937,7 +1987,7 @@ Panel {
         if (t === "]") root.stepPage(1)
         else if (t === "[") root.stepPage(-1)
         else if (key === "p") root.togglePrivacy()
-        else if (key === "t") root.setMode(root.camera.mode === "tracking" ? "standard" : "tracking")
+        else if (key === "t") root.setMode((root.camera.mode || root.remembered) === "tracking" ? "standard" : "tracking")
         else if (key === "c") root.home()
         else if (key === "m") root.toggleMicMute()
         // 'v' for video: 'p' is privacy and the preview is the video feed.
@@ -2445,7 +2495,7 @@ Panel {
                 // widget's transport buttons rather than invented here — there is
                 // no Style token for it, so matching the one precedent is the
                 // closest thing to a convention.
-                enabled: Model.modeWritable(root.camera)
+                enabled: Model.modeChoosable(root.camera, root.rememberMode)
                 opacity: enabled ? 1.0 : 0.4
                 // Privacy is not a chip: it is the hero switch, because it is
                 // the state you need to reach without reading the panel first.
@@ -2455,7 +2505,7 @@ Panel {
                 // tested explicitly rather than leaning on null being falsy,
                 // which would read as confirmed-open.
                 value: Model.privacyKnown(root.camera) && !root.privacy
-                  ? (root.camera.mode || "")
+                  ? (root.camera.mode || root.remembered)
                   : ""
                 foreground: root.foreground
                 accent: root.accent
@@ -2483,7 +2533,7 @@ Panel {
               width: parent.width
               wrapMode: Text.WordWrap
               visible: text !== ""
-              text: Model.modeNote(root.camera)
+              text: Model.modeNote(root.camera, root.remembered)
               color: root.faint
               font.family: root.fontFamily
               font.pixelSize: Style.font.caption
@@ -3164,17 +3214,6 @@ Panel {
               known: root.vendorShown.audio !== null
               note: Model.audioNote(root.vendorShown.audio)
               onPicked: function(value) { root.setAudioMode(value) }
-            }
-
-            DeviceSwitchRow {
-              width: parent.width
-              rowIndex: root.settingsGestureRow
-              glyph: "󰟋"
-              label: "Gesture control"
-              note: "Lets a raised hand start and stop the camera's own tracking."
-              checked: root.vendorShown.gesture === true
-              known: root.vendorShown.gesture !== null
-              onSwitched: function(enabled) { root.setGesture(enabled) }
             }
 
             DeviceChipRow {
