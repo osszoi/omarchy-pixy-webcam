@@ -100,6 +100,8 @@ function parseState(raw) {
     privacy: parsePrivacy(data),
     pan: clampPan(data.pan),
     tilt: clampTilt(data.tilt),
+    // pan/tilt above fall back to 0 when the read failed, and writing that back would recenter
+    ptzKnown: typeof data.pan === "number" && typeof data.tilt === "number",
     zoom: clampZoom(data.zoom === undefined ? ZOOM_MIN : data.zoom),
     presets: normalizePresets(data.presets),
     remembered: REMEMBERED_MODES.indexOf(String(data.remembered)) >= 0 ? String(data.remembered) : null,
@@ -131,6 +133,7 @@ function absentState(error) {
     privacy: null,
     pan: 0,
     tilt: 0,
+    ptzKnown: false,
     zoom: ZOOM_MIN,
     presets: {},
     remembered: null,
@@ -360,9 +363,9 @@ function streamLabel(state) {
 // anything that was already in the wanted state is left alone, so ending a call
 // cannot undo something the user set by hand.
 
-var CALL_ACTIONS = ["rememberMode", "unmute", "openLens"]
+var CALL_ACTIONS = ["rememberMode", "rememberFraming", "unmute", "openLens"]
 
-// The same three actions as the panel draws them: in the order they are applied,
+// The same actions as the panel draws them: in the order they are applied,
 // each with the settings key that persists it. Separate from CALL_ACTIONS because
 // that list is the plan's vocabulary and this is presentation — and because the
 // order differs on purpose, openLens first for the reason callStartPlan gives.
@@ -371,6 +374,9 @@ var CALL_ACTION_META = [
     note: "Uncovers the camera when a call starts, and closes it again after." },
   { key: "rememberMode", setting: "rememberMode", label: "Remember Standard/Tracking",
     note: "Your last pick is put back whenever the camera is in use.",
+    defaultValue: true },
+  { key: "rememberFraming", setting: "rememberFraming", label: "Keep the framing",
+    note: "Pan and tilt are put back when the lens opens or Tracking hands over to Standard.",
     defaultValue: true },
   { key: "unmute", setting: "callUnmute", label: "Unmute the microphone",
     note: "Only if it was muted — a mic left on is left alone." }
@@ -529,6 +535,26 @@ function modeMemoryAfterPick(mode, now) {
 
 function modeSyncPending(memory) {
   return !!memory && !!memory.asked && memory.attempts < MODE_SYNC_ATTEMPTS
+}
+
+// ---------------------------------------------------------------- remembered framing
+
+// the firmware recenters pan/tilt every time it opens the lens, and tracking moves the
+// motors too, neither telling the driver. uvcvideo only re-reads pan/tilt after a write,
+// so the readback keeps the last value written: what the panel shows, not where the
+// camera points. writing it back on the edge into this state puts the camera there
+function framingLive(state) {
+  return !!state && state.present === true && state.privacy === false
+    && state.mode === "standard" && state.ptzKnown === true
+    && (state.streaming === true || state.selfStreaming === true)
+}
+
+// writing the spot the camera already points at doesn't move it, so a needless write is harmless.
+// `moving` is a pan/tilt of the user's still in flight, which is newer than the readback
+function framingSync(wasLive, state, enabled, moving) {
+  var live = framingLive(state)
+  var write = live && !wasLive && !!enabled && !moving
+  return { live: live, write: write ? { pan: state.pan, tilt: state.tilt } : null }
 }
 
 // ---------------------------------------------------------------- pages

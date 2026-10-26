@@ -22,9 +22,10 @@ widget that looks and behaves like the first-party ones.
   real consequences if you misread it. It is the panel's hero switch rather than a third mode chip for
   the same reason.
 - **AI tracking.** Standard or Tracking, as a chip pair.
-- **Pan, tilt, and zoom.** A jog pad for aiming by feel, plus sliders showing the actual angle, read
-  back from the hardware — so the panel is right even after another app moved the camera. Three presets
-  save and recall a framing.
+- **Pan, tilt, and zoom.** A jog pad for aiming by feel, plus sliders showing the angle read back from
+  the driver — so the panel is right even after another app moved the camera. The camera recenters on
+  its own whenever it opens the lens without the readback noticing, so the panel puts it back. See
+  [Remembered framing](#remembered-framing). Three presets save and recall a framing.
 - **A live preview, pinned above everything.** Full panel width, started when you open the panel and
   stopped when you close it or the lens, or for good from the switch pinned just above it. It sits
   outside the scrolling area, so no page can scroll it away — the picture is the point of half these settings, and
@@ -109,10 +110,11 @@ the standard library.
 | `preview` | `true` | Show a live video preview in the panel. The switch above the preview writes this same setting. See [The preview and other apps](#the-preview-and-other-apps). |
 | `callOpenLens` | `false` | Open the lens when another app starts using the camera, and close it again after. |
 | `rememberMode` | `true` | Keep your last Standard/Tracking pick and put the camera back in it whenever it is in use. See [Remembered mode](#remembered-mode). |
+| `rememberFraming` | `true` | Put pan and tilt back where the panel shows them whenever the lens opens or Tracking hands over to Standard. See [Remembered framing](#remembered-framing). |
 | `callUnmute` | `false` | Unmute the camera's microphone when a call starts — only if it was muted. |
 
-The three `call*` settings have switches on the SETTINGS tab too; see
-[When a call starts](#when-a-call-starts).
+`callOpenLens`, `rememberMode`, `rememberFraming` and `callUnmute` have switches on the SETTINGS tab
+too; see [When a call starts](#when-a-call-starts).
 
 Set them in the settings dialog, in `~/.config/omarchy/shell.json`, or from the CLI:
 
@@ -388,6 +390,27 @@ measured), since the firmware drops writes right after the stream starts; a mid-
 ~6 s before it is undone; and nothing is enforced while the shell is not running. Turn `rememberMode` off
 to leave the mode alone entirely.
 
+### Remembered framing
+
+The pan/tilt the panel shows is the driver's copy of the last value written, not where the motors are:
+`uvcvideo` only asks the camera again after a write. The firmware moves the motors on its own in two
+cases and tells nobody, so the panel would say 0°, -5° while the camera points at 0°, 0°:
+
+- **Opening the lens** sends pan/tilt to 0°, 0°. That happens at the start of most calls, because auto
+  privacy closed the lens while the camera sat idle, and whenever the lens is reopened by hand. A
+  stream that restarts with the lens still open keeps its position.
+- **Tracking** moves the motors, and switching back to Standard leaves them wherever Tracking put them.
+
+So whenever the camera goes into "in use, lens open, Standard" (a call starting, the lens reopening
+mid-call, Tracking handing over to Standard), the panel writes the angles it shows back once. Writing
+the spot the camera is already at does not move it, so a needless write is harmless. Zoom is not
+touched, since it survives all of the above.
+
+Things it cannot do: the camera starts centered and moves a couple of seconds into the call, once the
+panel has noticed; a lens closed and reopened between two of its reads (by the palm gesture, say) is
+missed until the next edge; and nothing is enforced while the shell is not running. Turn
+`rememberFraming` off to leave the motors alone.
+
 ### When a call starts
 
 A call here is **any other app holding the video stream**, which needs no list of meeting apps: the
@@ -401,8 +424,8 @@ Standard/Tracking is not one of them, see [Remembered mode](#remembered-mode).
 
 Each is reversed at the end of the call, and *only if this widget was what changed it*: a lens you opened
 by hand stays open, and a mic deliberately left on is never muted for you. The panel says what it did
-rather than doing it silently. The switches on the page and the three `call*` settings are the same
-values, so they cannot disagree.
+rather than doing it silently. The switches on the page and the settings are the same values, so they
+cannot disagree.
 
 ## The microphone
 

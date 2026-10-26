@@ -29,6 +29,7 @@
       "preview": true,
       "callOpenLens": false,
       "rememberMode": true,
+      "rememberFraming": true,
       "callUnmute": false
     },
     "schema": [
@@ -79,6 +80,13 @@
         "label": "Remember Standard/Tracking",
         "defaultValue": true,
         "description": "Keep the last mode you picked and put the camera back in it whenever an app is using it, undoing any change made behind the panel's back. The camera only accepts the switch while something holds the stream, so the first couple of seconds of a call can still be in the old mode."
+      },
+      {
+        "key": "rememberFraming",
+        "type": "boolean",
+        "label": "Keep the framing",
+        "defaultValue": true,
+        "description": "The camera recenters pan and tilt every time it opens its lens, and Tracking moves it too, while the panel keeps showing the old angles. With this on, the angles the panel shows are written back whenever the lens opens or Tracking hands over to Standard, so the camera points where the panel says. It takes a couple of seconds into a call to notice, so the camera starts centered and then moves."
       },
       {
         "key": "callUnmute",

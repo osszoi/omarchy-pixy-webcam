@@ -115,6 +115,35 @@ what the slider was set to and the handle visibly jumps on the next refresh.
 a write returns the old position, so anything that writes then reads waits
 `PTZ_SETTLE` (0.35 s) in between.
 
+### The pan/tilt readback is the driver's, not the motors'
+
+`uvcvideo` caches `GET_CUR` for pan/tilt and zoom. `__uvc_ctrl_load_cur` returns
+early while `ctrl->loaded` is set, and the flag is only cleared on a commit
+(`uvc_ctrl_commit_entity`, for `UVC_CTRL_FLAG_AUTO_UPDATE` controls) or a status
+interrupt (`uvc_ctrl_status_event`), which this camera does not send. So
+`VIDIOC_G_CTRL` returns the last value anyone wrote through the driver, or what
+the first read after a write fetched. Probably also why HID motion desynchronizes
+it (see [Why HID PTZ is not used](#why-hid-ptz-is-not-used)).
+
+*(observed)* Tested by holding the stream with `ffmpeg`, writing at set times, and
+comparing frames, with the readback logged throughout:
+
+- Opening the lens sends pan/tilt to 0, 0, both when a stream starts on a lens
+  closed by auto privacy and when the lens is reopened mid-stream. The readback
+  keeps the old value. A stream restarted with the lens still open keeps its
+  position.
+- Tracking moves the motors without touching the readback, and switching back to
+  Standard leaves them where Tracking put them.
+- Zoom survives all of the above.
+- Writing the value the readback already holds still moves the motors, so the
+  firmware does not dedupe against its own target.
+- Writes 0.2 s and 1.1 s into a stream, while the lens was still unfolding, both
+  landed. Unlike mode writes, no drop window was seen.
+- Writing the position the camera already points at does not move it.
+
+That is what `Model.framingSync` builds on: one write of the shown angles each
+time the camera turns live in Standard with the lens open.
+
 ## Capture, for the terminal preview
 
 `scripts/pixy preview` captures frames itself rather than shelling out to

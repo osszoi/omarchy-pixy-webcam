@@ -508,10 +508,11 @@ Panel {
   readonly property var callActions: ({
     openLens: callSetting("callOpenLens"),
     rememberMode: callSetting("rememberMode"),
+    rememberFraming: callSetting("rememberFraming"),
     unmute: callSetting("callUnmute")
   })
   readonly property bool callAutomation: callActions.openLens || callActions.rememberMode
-    || callActions.unmute
+    || callActions.rememberFraming || callActions.unmute
 
   function setCallAction(key, enabled) {
     if (callSetting(key) === enabled) return
@@ -614,13 +615,26 @@ Panel {
   }
 
   // reads while something streams, so a dropped write is retried and a mid-call change undone.
-  // not keyed on privacy: the firmware reopens the lens on its own when a call starts
+  // not keyed on privacy: the firmware reopens the lens on its own when a call starts.
+  // also how a lens reopened mid-call gets its framing back
   Timer {
     interval: Model.modeSyncPending(root.modeMemory) ? Model.MODE_SYNC_RETRY_MS : 6000
     repeat: true
-    running: root.rememberMode && root.present
+    running: (root.rememberMode || root.rememberFraming) && root.present
       && (root.camera.streaming === true || root.camera.selfStreaming === true)
     onTriggered: root.refresh()
+  }
+
+  // ---------------------------------------------------------------- remembered framing
+
+  readonly property bool rememberFraming: callActions.rememberFraming
+  property bool framingLive: false
+
+  function syncFraming(state) {
+    var step = Model.framingSync(framingLive, state, rememberFraming,
+                                 ptzDebounce.running || motorTimer.running)
+    framingLive = step.live
+    if (step.write) run(Model.ptzArgs(helper, step.write.pan, step.write.tilt))
   }
 
   // ---------------------------------------------------------------- microphone
@@ -1409,6 +1423,7 @@ Panel {
     clampCursor()
     adoptRemembered(parsed.remembered)
     syncMode()
+    syncFraming(parsed)
     if (stateRunCallToken)
       callSession.acceptSnapshot(stateRunCallToken, parsed)
   }
@@ -1416,8 +1431,12 @@ Panel {
   // Only holders replies drive call edges. Full state reads update the panel but
   // cannot create an edge when the popout opens or when a mutation settles.
   function publishHolders(raw) {
+    var was = camera
     var next = Model.mergeHolders(camera, raw)
     camera = next
+    // our preview starting has no call snapshot behind it, so read now instead of on the next tick
+    if (!next.streaming && !next.selfStreaming) framingLive = false
+    else if (rememberFraming && next.selfStreaming && !was.selfStreaming) refresh()
     callSession.observeStreaming(next.streaming)
   }
 
@@ -3369,7 +3388,7 @@ Panel {
                 required property int index
                 width: panelColumn.width
                 rowIndex: root.settingsCallRow + index
-                glyph: index === 0 ? "󰄄" : (index === 1 ? "󰶑" : "󰍬")
+                glyph: ["󰄄", "󰶑", "󰆣", "󰍬"][index]
                 label: modelData.label
                 note: modelData.note
                 checked: root.callActions[modelData.key]

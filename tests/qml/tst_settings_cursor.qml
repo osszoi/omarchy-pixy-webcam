@@ -128,15 +128,16 @@ Item {
     // ---- the row count covers the rows that exist ----
 
     function test_the_count_reaches_the_last_slot_and_stops() {
-      // Audio + focus + 3 features + auto-privacy + 3 call switches +
+      // Audio + focus + 3 features + auto-privacy + 4 call switches +
       // snapshot + 3 slots. Written out once, against the real list lengths, so a
-      // count that drifts from the chain shows up here. Thirteen: the Back row went
-      // with the page becoming a tab, and the gesture row went in this fork.
+      // count that drifts from the chain shows up here. Fourteen: the Back row went
+      // with the page becoming a tab, the gesture row went in this fork, and the
+      // framing switch came in it.
       compare(Model.FEATURE_TOGGLES.length, 3)
-      compare(Model.CALL_ACTION_META.length, 3)
+      compare(Model.CALL_ACTION_META.length, 4)
       compare(Model.PRESET_SLOTS.length, 3)
-      compare(root.sectionCount("settings"), 13)
-      compare(root.settingsNativeRow, 10)
+      compare(root.sectionCount("settings"), 14)
+      compare(root.settingsNativeRow, 11)
     }
 
     function test_the_first_setting_is_the_first_row() {
@@ -164,10 +165,10 @@ Item {
         seen.push(root.actionAt(root.selectedIndex))
         root.moveCursor(1)
       }
-      compare(seen.slice(0, 13).join(" "),
+      compare(seen.slice(0, 14).join(" "),
               "audio focus "
               + "feature:flipHorizontal feature:flipVertical feature:autoRotate "
-              + "autoPrivacy call:openLens call:rememberMode call:unmute "
+              + "autoPrivacy call:openLens call:rememberMode call:rememberFraming call:unmute "
               + "snapshot clear:1 clear:2 clear:3")
       compare(root.selectedIndex, root.sectionCount("settings") - 1)
     }
